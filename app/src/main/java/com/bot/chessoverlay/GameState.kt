@@ -5,13 +5,17 @@ object GameState {
 
     var fen: String = START_FEN
     var suggestion: String = ""
-    var myIsWhite: Boolean = false
-    var flipped: Boolean = true
+    var myIsWhite: Boolean = true
+    var flipped: Boolean = false
     val history = ArrayList<String>()
 
     var statusMsg: String = ""
     var capturing: Boolean = false
     var boardVisible: Boolean = false
+
+    var trackingEnabled: Boolean = false
+    var lastDetectedMove: String = ""
+    var syncError: Boolean = false
 
     // Dipanggil di thread utama setiap kali ada perubahan.
     var onChange: (() -> Unit)? = null

@@ -39,10 +39,7 @@ class OverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
 
     private var started = false
-    private var pendingKey = ""
-    private var pendingCount = 0
-    private var lastKey = ""
-    private var zeroCount = 0
+    private val moveSynchronizer = MoveSynchronizer()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -135,10 +132,10 @@ class OverlayService : Service() {
         }
 
         GameState.capturing = true
-        GameState.statusMsg = "Rekam layar aktif. Buka game-nya."
-        if (GameState.fen == GameState.START_FEN) {
+        if (GameState.trackingEnabled) {
             GameController.recompute()
         } else {
+            GameState.statusMsg = "Overlay aktif. Tekan 'Mulai Pelacakan' di posisi awal."
             GameController.notifyChange()
         }
         return START_NOT_STICKY
@@ -210,70 +207,67 @@ class OverlayService : Service() {
 
     // Berjalan di thread utama.
     private fun onObservation(present: Boolean, hl: List<String>) {
-        if (GameState.boardVisible != present) {
+        if (present != GameState.boardVisible) {
             GameState.boardVisible = present
             GameController.notifyChange()
         }
-        if (!present) return
 
-        if (hl.size == 2) {
-            zeroCount = 0
-            val key = hl.sorted().joinToString("")
-            if (key == lastKey) return
-            if (key != pendingKey) {
-                pendingKey = key
-                pendingCount = 1
-                return
-            }
-            pendingCount += 1
-            if (pendingCount < 2) return
-            lastKey = key
-            handlePair(hl[0], hl[1])
-        } else if (hl.isEmpty()) {
-            zeroCount += 1
-            if (zeroCount == 8 && GameState.fen != GameState.START_FEN) {
-                // Kotak langkah hilang cukup lama: game kemungkinan di-restart.
-                lastKey = ""
-                pendingKey = ""
-                GameController.resetGame()
-            }
-        }
-    }
-
-    private fun tryPair(fen: String, a: String, b: String): String? {
-        return ChessEngine.applyMove(fen, a + b) ?: ChessEngine.applyMove(fen, b + a)
-    }
-
-    private fun handlePair(a: String, b: String) {
-        val newFen = tryPair(GameState.fen, a, b)
-        if (newFen != null) {
-            GameController.commit(newFen)
+        if (!present || !GameState.trackingEnabled) {
+            moveSynchronizer.resetPending()
             return
         }
-        // Mungkin saya sudah main sesuai saran lalu komputer membalas.
-        if (GameController.isMyTurn() && GameState.suggestion.length >= 4) {
-            val afterMine = ChessEngine.applyMove(GameState.fen, GameState.suggestion)
-            if (afterMine != null) {
-                val f2 = tryPair(afterMine, a, b)
-                if (f2 != null) {
-                    GameController.commit(afterMine)
-                    GameController.commit(f2)
-                    return
+
+        if (hl.isEmpty()) {
+            moveSynchronizer.observe(GameState.fen, hl)
+            if (moveSynchronizer.isBoardResetDetected() && GameState.fen != GameState.START_FEN) {
+                GameState.statusMsg = "Menunggu langkah..."
+                GameController.notifyChange()
+            }
+            return
+        }
+
+        if (GameState.syncError) {
+            return
+        }
+
+        val syncResult = moveSynchronizer.observe(
+            fen = GameState.fen,
+            highlights = hl
+        )
+
+        if (syncResult != null) {
+            GameState.lastDetectedMove = syncResult.detectedMove
+            if (syncResult.outOfSync) {
+                GameController.markOutOfSync(syncResult.detectedMove)
+            } else {
+                GameController.commit(syncResult.fen)
+                if (syncResult.assumedQueenPromotion) {
+                    GameState.statusMsg = "Promosi dianggap Ratu, cek manual kalo lu promosi jadi lain"
+                    GameController.notifyChange()
                 }
             }
+            return
         }
-        GameState.statusMsg = "Tidak sinkron dengan game ($a-$b). Restart game lalu tekan Partai baru."
-        GameState.suggestion = ""
-        GameController.notifyChange()
     }
 
-    // Menggambar ulang panah dari GameState.
+    fun resetSynchronizerOnly() {
+        moveSynchronizer.reset()
+    }
+
+    fun resetTracking() {
+        moveSynchronizer.reset()
+        sync()
+    }
+
+    // Menggambar ulang panah dan lingkaran hijau hanya jika posisi terverifikasi & sinkron.
     fun sync() {
         val v = arrow ?: return
         v.flipped = GameState.flipped
-        v.show = GameState.boardVisible
+        v.show = GameState.boardVisible &&
+                 GameState.trackingEnabled &&
+                 !GameState.syncError
         val s = GameState.suggestion
-        if (s.length >= 4) {
+        if (!GameState.syncError && s.length >= 4) {
             v.fromSq = (s[1] - '1') * 8 + (s[0] - 'a')
             v.toSq = (s[3] - '1') * 8 + (s[2] - 'a')
         } else {
@@ -288,6 +282,7 @@ class OverlayService : Service() {
         instance = null
         GameState.capturing = false
         GameState.boardVisible = false
+        moveSynchronizer.reset()
         bg?.removeCallbacksAndMessages(null)
         try {
             display?.release()

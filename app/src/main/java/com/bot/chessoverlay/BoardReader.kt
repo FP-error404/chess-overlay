@@ -4,15 +4,9 @@ object BoardReader {
 
     class Result(val present: Boolean, val highlights: List<String>)
 
-    // Geometri papan game di layar 1080 x 2400 (diukur dari screenshot).
-    private const val REF_W = 1080f
-    private const val REF_H = 2400f
-    private const val LEFT = 30f
-    private const val TOP = 660f
-    private const val CELL = 127.5f
-
-    private val DX = intArrayOf(12, 115, 12, 115, 12, 115)
-    private val DY = intArrayOf(115, 115, 64, 64, 38, 38)
+    // Titik sampling di strip bawah dalam petak agar tidak ketutup bidak 3D.
+    private val DX = intArrayOf(22, 64, 105, 22, 64, 105)
+    private val DY = intArrayOf(108, 108, 108, 116, 116, 116)
 
     private fun red(c: Int): Int = (c shr 16) and 255
     private fun green(c: Int): Int = (c shr 8) and 255
@@ -20,8 +14,9 @@ object BoardReader {
 
     private fun isGold(c: Int): Boolean {
         val r = red(c)
+        val g = green(c)
         val b = blue(c)
-        return r > 100 && b < 60 && (r - b) > 80
+        return r >= 135 && g >= 90 && b <= 35 && (r - b) >= 110 && (g - b) >= 70
     }
 
     private fun isCream(c: Int): Boolean {
@@ -35,15 +30,9 @@ object BoardReader {
         return red(c) < 50 && green(c) < 50 && blue(c) < 50
     }
 
-    private fun sqName(col: Int, row: Int, flipped: Boolean): String {
-        val f = if (flipped) 7 - col else col
-        val r = if (flipped) row else 7 - row
-        return "${'a' + f}${r + 1}"
-    }
-
     fun analyze(w: Int, h: Int, flipped: Boolean, px: (Int, Int) -> Int): Result {
-        val sx = w / REF_W
-        val sy = h / REF_H
+        val sx = w / BoardGeometry.REF_W
+        val sy = h / BoardGeometry.REF_H
         val hl = ArrayList<String>()
         var valid = 0
         for (row in 0 until 8) {
@@ -51,8 +40,8 @@ object BoardReader {
                 var gold = 0
                 var ok = 0
                 for (i in 0 until 6) {
-                    val x = ((LEFT + col * CELL + DX[i]) * sx).toInt()
-                    val y = ((TOP + row * CELL + DY[i]) * sy).toInt()
+                    val x = ((BoardGeometry.LEFT + col * BoardGeometry.CELL + DX[i]) * sx).toInt()
+                    val y = ((BoardGeometry.TOP + row * BoardGeometry.CELL + DY[i]) * sy).toInt()
                     if (x < 0 || y < 0 || x >= w || y >= h) continue
                     val c = px(x, y)
                     if (isGold(c)) {
@@ -64,7 +53,7 @@ object BoardReader {
                         if (isDark(c)) ok += 1
                     }
                 }
-                if (gold >= 4) hl.add(sqName(col, row, flipped))
+                if (gold >= 4) hl.add(BoardGeometry.sqName(col, row, flipped))
                 if (ok >= 4) valid += 1
             }
         }

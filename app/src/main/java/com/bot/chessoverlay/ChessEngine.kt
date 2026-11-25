@@ -85,7 +85,7 @@ object ChessEngine {
     private val OR_F = intArrayOf(1, -1, 0, 0)
     private val OR_R = intArrayOf(0, 0, 1, -1)
 
-    private class Pos(val b: IntArray, val side: Int, val castle: Int, val ep: Int)
+    private class Pos(val b: IntArray, val side: Int, val castle: Int, val ep: Int, val halfmove: Int = 0, val fullmove: Int = 1)
 
     // ---------- API publik ----------
 
@@ -196,7 +196,7 @@ object ChessEngine {
         sb.append(cs)
         sb.append(' ')
         sb.append(if (pos.ep >= 0) sqName(pos.ep) else "-")
-        sb.append(" 0 1")
+        sb.append(" ${pos.halfmove.coerceAtLeast(0)} ${pos.fullmove.coerceAtLeast(1)}")
         return sb.toString()
     }
 
@@ -302,7 +302,9 @@ object ChessEngine {
         if (parts.size > 3 && parts[3].length == 2 && parts[3] != "-") {
             ep = (parts[3][1] - '1') * 8 + (parts[3][0] - 'a')
         }
-        return Pos(b, side, c, ep)
+        val halfmove = parts.getOrNull(4)?.toIntOrNull() ?: 0
+        val fullmove = parts.getOrNull(5)?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        return Pos(b, side, c, ep, halfmove, fullmove)
     }
 
     private fun attacked(b: IntArray, sq: Int, by: Int): Boolean {
@@ -501,7 +503,10 @@ object ChessEngine {
         var c = pos.castle
         c = c and maskFor(from).inv()
         c = c and maskFor(to).inv()
-        return Pos(b, -side, c, ep)
+        val isCapture = cap != 0 || (t == 1 && to == pos.ep && (from % 8) != (to % 8))
+        val nextHalfmove = if (t == 1 || isCapture) 0 else pos.halfmove + 1
+        val nextFullmove = if (side == -1) pos.fullmove + 1 else pos.fullmove
+        return Pos(b, -side, c, ep, nextHalfmove, nextFullmove)
     }
 
     private fun kingSq(b: IntArray, side: Int): Int {
